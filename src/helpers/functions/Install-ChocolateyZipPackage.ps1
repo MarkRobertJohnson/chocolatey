@@ -48,9 +48,11 @@ param(
     $chocTempDir = Join-Path $env:TEMP "chocolatey"
     $tempDir = Join-Path $chocTempDir "$packageName"
     if (![System.IO.Directory]::Exists($tempDir)) {[System.IO.Directory]::CreateDirectory($tempDir)}
-    $file = Join-Path $tempDir "$($packageName)Install.$fileType"
-    
-    Get-ChocolateyWebFile $packageName $file $url $url64bit
+   # $file = Join-Path $tempDir "$($packageName)Install.$fileType"
+    $downloadDir = $tempDir
+    $file = ""
+
+    Get-ChocolateyWebFile $packageName $downloadDir $url $url64bit -actualOutputPath ([ref]$file)
     Get-ChocolateyUnzip "$file" $unzipLocation $specificFolder $packageName
     
     Write-ChocolateySuccess $packageName

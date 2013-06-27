@@ -56,10 +56,25 @@ param(
     $chocTempDir = Join-Path $env:TEMP "chocolatey"
     $tempDir = Join-Path $chocTempDir "$packageName"
     if (![System.IO.Directory]::Exists($tempDir)) {[System.IO.Directory]::CreateDirectory($tempDir) | Out-Null}
-    $file = Join-Path $tempDir "$($packageName)Install.$fileType"
-  
-    Get-ChocolateyWebFile $packageName $file $url $url64bit
-    Install-ChocolateyInstallPackage $packageName $fileType $silentArgs $file -validExitCodes $validExitCodes
+    #$file = Join-Path $tempDir "$($packageName)Install.$fileType"
+    $downloadDir = $tempDir
+    $file = ""
+    #Because we generally want to retain the original file name, we nneed to get an out parameter that contains
+    #   the name of the downloaded file (actual file name cannot be known until response comes back from the server)
+    Get-ChocolateyWebFile $packageName $downloadDir $url $url64bit -actualOutputPath ([ref]$file)
+
+      if(-not $env:ChocolateyCacheInstallersOnly) {
+        $env:ChocolateyCacheInstallersOnly = [Environment]::GetEnvironmentVariable("ChocolateyCacheInstallersOnly","Machine")
+        if(-not $env:ChocolateyCacheInstallersOnly) {
+          $env:ChocolateyCacheInstallersOnly = [Environment]::GetEnvironmentVariable("ChocolateyCacheInstallersOnly","User")
+        }
+      }
+      write-warning (" ChocolateyCacheInstallersOnly value = " + $env:ChocolateyCacheInstallersOnly)
+    if(-not $env:ChocolateyCacheInstallersOnly) {
+        Install-ChocolateyInstallPackage $packageName $fileType $silentArgs $file -validExitCodes $validExitCodes
+    } else {
+        Write-Warning "Will not install package because the ChocolateyCacheInstallersOnly environment variable is true "
+    }
     Write-ChocolateySuccess $packageName
   } catch {
     Write-ChocolateyFailure $packageName $($_.Exception.Message)
