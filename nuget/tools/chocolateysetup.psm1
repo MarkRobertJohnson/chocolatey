@@ -23,106 +23,48 @@ function Create-DirectoryIfNotExists($folderName){
   if (![System.IO.Directory]::Exists($folderName)) {[System.IO.Directory]::CreateDirectory($folderName)}
 }
 
+function Create-BinFile {
+param (
+  [string] $chocolateyPath
+  [string] $binFilePath,
+  [Parameter(Mandatory=$false)][string] $commandText
+)
+
+  $commandShortcut = [System.IO.Path]::GetFileNameWithoutExtension("$chocolateyPath")
+  if ($commandText -ne $null -and $commandText -ne '') {
+    Write-Host "Creating `'$binFilePath`' so you can call 'choco $commandText' from a shortcut of '$commandShortcut'."
+    $commandText += ' %*'
+  } else {
+    Write-Host "Creating `'$binFilePath`' so you can call '$commandShortcut'."
+    $commandText = '%*'
+  }
+
+"@echo off
+SET DIR=%~dp0%
+cmd /c ""$chocolateyPath\chocolatey.cmd"" $commandText
+exit /b %ERRORLEVEL%" | Out-File $binFilePath -encoding ASCII
+
+"#!/bin/sh
+""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename `$0).bat `$*""
+exit `$?" | Out-File $binFilePath.Replace(".bat","") -encoding ASCII
+
+}
+
 function Create-ChocolateyBinFiles {
 param(
-  [string] $nugetChocolateyPath,
+  [string] $chocolateyPath,
   [string] $chocolateyExePath
 )
 
-$chocolateyPathBash = $nugetChocolateyPath.Replace("%DIR%..\","`$DIR/../").Replace("\","/")
-
-$nugetChocolateyBinFile = Join-Path $chocolateyExePath 'chocolatey.bat'
-$nugetChocolateyBinFileAlias = Join-Path $chocolateyExePath 'choco.bat'
-$nugetChocolateyInstallAlias = Join-Path $chocolateyExePath 'cinst.bat'
-$nugetChocolateyUpdateAlias = Join-Path $chocolateyExePath 'cup.bat'
-$nugetChocolateyUninstallAlias = Join-Path $chocolateyExePath 'cuninst.bat'
-$nugetChocolateyListAlias = Join-Path $chocolateyExePath 'clist.bat'
-$nugetChocolateyVersionAlias = Join-Path $chocolateyExePath 'cver.bat'
-$nugetChocolateyPackAlias = Join-Path $chocolateyExePath 'cpack.bat'
-$nugetChocolateyPushAlias = Join-Path $chocolateyExePath 'cpush.bat'
-
-
-Write-Host "Creating `'$nugetChocolateyBinFile`' so you can call 'chocolatey' from anywhere."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" %*" | Out-File $nugetChocolateyBinFile -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyBinFile.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyBinFileAlias`' so you can call 'choco' from anywhere."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" %*" | Out-File $nugetChocolateyBinFileAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyBinFileAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyInstallAlias`' so you can call 'chocolatey install' from a shortcut of 'cinst'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" install %*" | Out-File $nugetChocolateyInstallAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyInstallAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyUpdateAlias`' so you can call 'chocolatey update' from a shortcut of 'cup'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" update %*" | Out-File $nugetChocolateyUpdateAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyUpdateAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyListAlias`' so you can call 'chocolatey list' from a shortcut of 'clist'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" list %*" | Out-File $nugetChocolateyListAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyListAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyVersionAlias`' so you can call 'chocolatey version' from a shortcut of 'cver'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" version %*" | Out-File $nugetChocolateyVersionAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyVersionAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyPackAlias`' so you can call 'chocolatey pack' from a shortcut of 'cpack'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" pack %*" | Out-File $nugetChocolateyPackAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyPackAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyPushAlias`' so you can call 'chocolatey push' from a shortcut of 'cpush'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" push %*" | Out-File $nugetChocolateyPushAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyPushAlias.Replace(".bat","") -encoding ASCII 
-
-Write-Host "Creating `'$nugetChocolateyUninstallAlias`' so you can call 'chocolatey uninstall' from a shortcut of 'cuninst'."
-"@echo off
-SET DIR=%~dp0%
-""$nugetChocolateyPath\chocolatey.cmd"" uninstall %*" | Out-File $nugetChocolateyUninstallAlias -encoding ASCII
-
-"#!/bin/sh
-""`$SYSTEMROOT/System32/cmd.exe"" /c ""`$(basename $0).bat `$*""
-exit `$?" | Out-File $nugetChocolateyUninstallAlias.Replace(".bat","") -encoding ASCII 
-
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'chocolatey.bat')
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'choco.bat')
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cinst.bat') 'install'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cup.bat') 'update'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cuninst.bat') 'uninstall'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'clist.bat') 'list'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cver.bat') 'version'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cpack.bat') 'pack'
+  Create-BinFile $chocolateyPath (Join-Path $chocolateyExePath 'cpush.bat') 'push'
 }
 
 function Initialize-Chocolatey {
@@ -185,17 +127,17 @@ Creating Chocolatey NuGet folders if they do not already exist.
   Create-DirectoryIfNotExists $chocolateyExePath
   Create-DirectoryIfNotExists $chocolateyLibPath
   Create-DirectoryIfNotExists $nugetChocolateyPath
-  
+
   Upgrade-OldNuGetDirectory $defaultChocolateyPathOld $chocolateyPath
-  
+
   Install-ChocolateyFiles $chocolateyPath
-  
+
   $chocolateyExePathVariable = $chocolateyExePath.ToLower().Replace($chocolateyPath.ToLower(), "%DIR%..\").Replace("\\","\")
   Create-ChocolateyBinFiles $nugetChocolateyPath.ToLower().Replace($chocolateyPath.ToLower(), "%DIR%..\").Replace("\\","\") $chocolateyExePath
   Initialize-ChocolateyPath $chocolateyExePath $chocolateyExePathVariable
   Process-ChocolateyBinFiles $chocolateyExePath $chocolateyExePathVariable
   Install-DotNet4IfMissing
-  
+
 @"
 Chocolatey is now ready.
 You can call chocolatey from anywhere, command line or powershell by typing chocolatey.
@@ -205,6 +147,7 @@ If you are upgrading chocolatey from an older version (prior to 0.9.8.15) and do
 "@ | write-host
 }
 
+# not a fan of using webpi here as it isn't always awesome.
 function Install-DotNet4IfMissing {
     if([IntPtr]::Size -eq 8) {$fx="framework64"} else {$fx="framework"}
     if(!(test-path "$env:windir\Microsoft.Net\$fx\v4.0.30319")) {
@@ -212,7 +155,7 @@ function Install-DotNet4IfMissing {
         $env:chocolateyPackageFolder="$env:temp\chocolatey\webcmd"
         Import-Module $env:ChocolateyInstall\chocolateyinstall\helpers\chocolateyInstaller.psm1
         Install-ChocolateyZipPackage 'webcmd' 'http://www.iis.net/community/files/webpi/webpicmdline_anycpu.zip' $env:temp
-        Start-ChocolateyProcessAsAdmin ".'$env:temp\WebpiCmdLine.exe' /products: NetFramework4 /accepteula"
+        Start-ChocolateyProcessAsAdmin ".'$env:temp\WebpiCmdLine.exe' /products: NetFramework4 /SuppressReboot /accepteula"
         Remove-Module ChocolateyInstaller
     }
 }
@@ -225,13 +168,13 @@ param(
 
   if((test-path $defaultChocolateyPathOld)){
     Write-Host "Upgrading `'$chocolateyPathOld`' to `'$chocolateyPath`'."
-    
+
     Write-Host "Copying the contents of `'$chocolateyPathOld`' to `'$chocolateyPath`'. This step may fail if you have anything in this folder running or locked."
     Write-Host 'If it fails, just manually copy the rest of the items out and then delete the folder.'
     Copy-Item "$($chocolateyPathOld)\*" "$chocolateyPath" -force -recurse
     #write-host "Attempting to remove `'$chocolateyPathOld`'. This may fail if something in the folder is being used or locked. If it fails, same idea as above."
     #Remove-Item "$($chocolateyPathOld)" -force -recurse
-    
+
     $chocolateyExePathOld = Join-Path $chocolateyPathOld 'bin'
     $statementTerminator = ";"
     #get the PATH variable
@@ -254,17 +197,17 @@ function Install-ChocolateyFiles {
 param(
   [string]$chocolateyPath = "$sysDrive\Chocolatey"
 )
-  #$chocInstallFolder = Get-ChildItem .\ -Recurse | ?{$_.name -match  "chocolateyInstall*"} | sort name -Descending | select -First 1 
-  #$thisScript = (Get-Variable MyInvocation -Scope 1).Value 
+  #$chocInstallFolder = Get-ChildItem .\ -Recurse | ?{$_.name -match  "chocolateyInstall*"} | sort name -Descending | select -First 1
+  #$thisScript = (Get-Variable MyInvocation -Scope 1).Value
   #$thisScriptFolder = Split-Path $thisScript.MyCommand.Path
-  
+
   $chocInstallFolder = Join-Path $thisScriptFolder "chocolateyInstall"
   Write-Host "Copying the contents of `'$chocInstallFolder`' to `'$chocolateyPath`'."
   if(test-path "$chocolateyPath\chocolateyInstall\functions") {
-    Remove-Item "$chocolateyPath\chocolateyInstall\functions" -recurse -force 
+    Remove-Item "$chocolateyPath\chocolateyInstall\functions" -recurse -force
   }
   if(test-path "$chocolateyPath\chocolateyInstall\helpers") {
-    Remove-Item "$chocolateyPath\chocolateyInstall\helpers" -recurse -force 
+    Remove-Item "$chocolateyPath\chocolateyInstall\helpers" -recurse -force
   }
   Copy-Item $chocInstallFolder $chocolateyPath -recurse -force
 }
@@ -278,8 +221,8 @@ param(
   $statementTerminator = ";"
   #get the PATH variable
   $envPath = $env:PATH
-  
-  #if you do not find $chocolateyPath\bin, add it 
+
+  #if you do not find $chocolateyPath\bin, add it
   if (!$envPath.ToLower().Contains($chocolateyExePath.ToLower())) # -and !$envPath.ToLower().Contains($chocolateyExePathVariable))
   {
     Write-Host ''
@@ -287,7 +230,7 @@ param(
     Write-Host "PATH environment variable does not have `'$chocolateyExePath`' in it. Adding."
     #Write-Host 'PATH environment variable does not have ' $chocolateyExePathVariable ' in it. Adding.'
     $userPath = [Environment]::GetEnvironmentVariable('Path', [System.EnvironmentVariableTarget]::User)
-  
+
     #does the path end in ';'?
     $hasStatementTerminator = $userPath -ne $null -and $userPath.EndsWith($statementTerminator)
     # if the last digit is not ;, then we are adding it
@@ -320,12 +263,12 @@ param(
       $fileText = $reader.ReadToEnd()
       $reader.Close()
       $fileStream.Close()
-      
+
       $fileText = $fileText.ToLower().Replace("`"" + $chocolateyPath.ToLower(), "SET DIR=%~dp0%`n""%DIR%..\").Replace("\\","\")
-      
+
       Set-Content $file -Value $fileText -Encoding Ascii
     }
-    
+
     Set-Content $processedMarkerFile -Value "$([System.DateTime]::Now.Date)" -Encoding Ascii
   }
 }

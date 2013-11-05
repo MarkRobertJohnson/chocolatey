@@ -4,7 +4,7 @@
 Downloads a file from the internets.
 
 .DESCRIPTION
-This will download a file from a url, tracking with a progress bar. 
+This will download a file from a url, tracking with a progress bar.
 It returns the filepath to the downloaded file when it is complete.
 
 .PARAMETER PackageName
@@ -15,7 +15,7 @@ It's recommended you call it the same as your nuget package id.
 This is the full path of the resulting file name.
 
 .PARAMETER Url
-This is the url to download the file from. 
+This is the url to download the file from.
 
 .PARAMETER Url64bit
 OPTIONAL - If there is an x64 installer to download, please include it here. If not, delete this parameter
@@ -34,31 +34,37 @@ param(
   [string] $packageName,
   [string] $fileFullPath,
   [string] $url,
-  [string] $url64bit = $url,
+  [string] $url64bit = '',
   [ref]$actualOutputPath
 )
   Write-Debug "Running 'Get-ChocolateyWebFile' for $packageName with url:`'$url`', fileFullPath:`'$fileFullPath`',and url64bit:`'$url64bit`'";
-  $url32bit = $url;
 
-  #This URL is only for caching the downloaded file
+  #This URL is only for caching the downloaded file (If installing 32 bit package, the 64 bit package is cached)
   $cacheOnlyUrl = $url64bit
   $cacheOnlyBitwidth = 64
+
+  $url32bit = $url;
+  $bitWidth = 32
+  
+  
   if (Get-ProcessorBits 64) {
-  	$bitWidth = 64
-  	$url = $url64bit;
-    $cacheOnlyUrl = $url32bit;
-    $cacheOnlyBitwidth = 32
-  } else { # I am just assuming that it's either 32 or 64. 
-	  $bitWidth = 32
+    $bitWidth = 64
+
   }
   Write-Debug "CPU is $bitWidth bit"
-  
-  if ($url32bit -eq $url64bit) {
-	$bitPackage = 32
-  } else {
-	$bitPackage = $bitWidth
+
+  $bitPackage = 32
+  if ($bitWidth -eq 64 -and $url64bit -ne $null -and $url64bit -ne '') {
+    Write-Debug "Setting url to '$url64bit' and bitPackage to $bitWidth"
+    $bitPackage = $bitWidth
+    $url = $url64bit;
+    
+    #When installing the 64 bit version, we also want to download and cache (not install) the 32 bit version
+    $cacheOnlyUrl = $url32bit;
+    $cacheOnlyBitwidth = 32
+
   }
-  
+
   #Take care of checking for locally cached installers
   $fullInstallerPath = ""
   if(Handle-CachedPackageInstaller -packageName $packageName -bitwidth $bitwidth -fileFullPath $fileFullPath -actualOutputPath ([ref]$fullInstallerPath)) {
@@ -78,7 +84,7 @@ param(
     Get-WebFile -url $url -filename $fileFullPath -actualOutputPath ([ref]$downloadLocation)
 
     #Also download and cache the other bitwidth URL
-    if($url32bit -notlike $url64bit) {
+    if($url64Bit -and ($url32bit -notlike $url64bit)) {
         $cacheDownloadLocation = ""
         Get-WebFile -url $cacheOnlyUrl -filename $fileFullPath -actualOutputPath ([ref]$cacheDownloadLocation)
         Copy-DownloadedFileToCachePath -downloadLocation $cacheDownloadLocation -url $cacheOnlyUrl -packageName $packageName -bitwidth $cacheOnlyBitwidth
@@ -87,29 +93,31 @@ param(
   } elseif ($url.StartsWith('ftp')) {
       $downloadLocation =  $fileFullPath
       
-    #if the $fileFullPath is a directory, then pull the file name fomr the source URL
+    #if the $fileFullPath is a directory, then pull the file name from the source URL
     if(Test-Path $fileFullPath -PathType Container) {
         $requestUri = new-object System.Uri ($url)
         $downloadLocation = Join-Path $fileFullPath ([io.path]::GetFileName($requestUri.LocalPath))
     }
     Get-FtpFile $url $fileFullPath
   } else {
+    if ($url.StartsWith('file:')) { $url = ([uri] $url).LocalPath }
     Write-Debug "We are attempting to copy the local item `'$url`' to `'$fileFullPath`'"
 
     $downloadLocation =  $fileFullPath
-    #if the $fileFullPath is a directory, then pull the file name fomr the source URL
+    #if the $fileFullPath is a directory, then pull the file name from the source URL
     if(Test-Path $fileFullPath -PathType Container) {
         $downloadLocation = Join-Path $fileFullPath ([io.path]::GetFileName($url))
     }
     Copy-Item $url -Destination $fileFullPath -Force 
   }
+  #If the caller has provided a [ref] variable, set it to the location where the file was downloaded
     if($actualOutputPath) {
       $actualOutputPath.Value = $downloadLocation
     }
   
     Copy-DownloadedFileToCachePath -downloadLocation $downloadLocation -url $url -packageName $packageName -bitwidth $bitWidth
 
-  
+
   Start-Sleep 2 #give it a sec or two to finish up
 }
 
