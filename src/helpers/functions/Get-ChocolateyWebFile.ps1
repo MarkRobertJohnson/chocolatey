@@ -59,7 +59,7 @@ param(
 	$bitPackage = $bitWidth
   }
   
-  #Take care of checking
+  #Take care of checking for locally cached installers
   $fullInstallerPath = ""
   if(Handle-CachedPackageInstaller -packageName $packageName -bitwidth $bitwidth -fileFullPath $fileFullPath -actualOutputPath ([ref]$fullInstallerPath)) {
     if($actualOutputPath) { $actualOutputPath.Value = $fullInstallerPath}
@@ -210,8 +210,9 @@ The cached files have the form of <PACKAGE_NAME>__x<BITWIDTH>__<ACTUALFILENAME>
 function Handle-CachedPackageInstaller {
 <#
 .SYNOPSIS
-Checks to see if a caches version of an installer exists for the given packagename and bitwidth (32 or 64).  
-If the cached installer file exists, it will be copied to the location specified by fileFullPath.  
+Checks to see if a cached version of an installer exists for the given packagename and bitwidth (32 or 64).  
+If the cached installer file exists, it will be copied to the location specified by fileFullPath. The file name
+of the installer in the cached source will be used and returned as an output paramter 
 
 .PARAMETER fileFullPath
 The full path of the desired location for the cached isntaller file (this is where the file will be copied to)
@@ -231,23 +232,44 @@ System.Bool. Returns true if a cache file exists, false if not
   )
   #first check if there is a local cache for the installer
   $cacheFullPath = Get-CachedInstallerPath -PackageNameAndVersion $packageName -bitwidth $bitwidth
- 
-  if($cacheFullPath -and (Test-Path $cacheFullPath -PathType Leaf)) {
-    write-Host "Using cached installer found at: $cacheFullPath"
+  $actualInstallerFullPath = $fileFullPath
 
-    #Copy the cached version of the file to the requested location if different
-    $cachedInstallerDir = [io.path]::GetDirectoryName($cacheFullPath)
+  try {
+        if($cacheFullPath -and (Test-Path $cacheFullPath -PathType Leaf)) {
+            write-Host "Using cached installer found at: $cacheFullPath"
 
-    $actualInstallerFileName = join-path $fileFullPath (Get-ActualInstallerFileName $cacheFullPath)
-
-    copy $cacheFullPath  $actualInstallerFileName -force -verbose
+            #Copy the cached version of the file to the requested location if different
+            $cachedInstallerDir = [io.path]::GetDirectoryName($cacheFullPath)
     
-    if($actualOutputPath) {
-        $actualOutputPath.Value = $actualInstallerFileName
+            $actualInstallerFileName = Get-ActualInstallerFileName $cacheFullPath
+            $providedInstallerFileName = [io.path]::GetFileName($fileFullPath) 
+            $installerDir = ([io.path]::GetDirectoryName($fileFullPath.TrimEnd('\/ ')))
+
+            #the provided fileFUllPath is a directory
+            if((Test-Path $fileFullPath -PathType Container)) {
+                $actualInstallerFullPath = join-path  $fileFullPath $actualInstallerFileName
+
+            } elseif($providedInstallerFileName -notlike "$actualInstallerFileName") {
+            #The Provided file name does not match the actual installer name 
+                $installerDir = ([io.path]::GetDirectoryName($installerDir))
+                $actualInstallerFullPath = join-path  $installerDir $actualInstallerFileName 
+            }
+
+            if(-not (Test-Path $installerDir)) {
+                mkdir $installerDir
+            }
+
+            copy $cacheFullPath   $actualInstallerFullPath -force -verbose
+    
+
+
+            return $true;
+        }
+
+        return $false;
+    } finally {
+        if($actualOutputPath) {
+            $actualOutputPath.Value =  $actualInstallerFullPath
+        }
     }
-
-    return $true;
-  }
-
-  return $false;
 }
