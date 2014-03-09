@@ -67,7 +67,8 @@ param(
 
   #Take care of checking for locally cached installers
   $fullInstallerPath = ""
-  if(Handle-CachedPackageInstaller -packageName $packageName -bitwidth $bitwidth -fileFullPath $fileFullPath -actualOutputPath ([ref]$fullInstallerPath)) {
+  if(Handle-CachedPackageInstaller -packageName $packageName -url $url -fileFullPath $fileFullPath -actualOutputPath ([ref]$fullInstallerPath)) {
+    Write-Debug "Using cached WebFile at $fullInstallerPath"
     if($actualOutputPath) { $actualOutputPath.Value = $fullInstallerPath}
     return;
   }
@@ -87,7 +88,7 @@ param(
     if($url64Bit -and ($url32bit -notlike $url64bit)) {
         $cacheDownloadLocation = ""
         Get-WebFile -url $cacheOnlyUrl -filename $fileFullPath -actualOutputPath ([ref]$cacheDownloadLocation)
-        Copy-DownloadedFileToCachePath -downloadLocation $cacheDownloadLocation -url $cacheOnlyUrl -packageName $packageName -bitwidth $cacheOnlyBitwidth
+        Copy-DownloadedFileToCachePath -downloadLocation $cacheDownloadLocation -url $cacheOnlyUrl -packageName $packageName
     }
 
   } elseif ($url.StartsWith('ftp')) {
@@ -115,21 +116,25 @@ param(
       $actualOutputPath.Value = $downloadLocation
     }
   
-    Copy-DownloadedFileToCachePath -downloadLocation $downloadLocation -url $url -packageName $packageName -bitwidth $bitWidth
+    Copy-DownloadedFileToCachePath -downloadLocation $downloadLocation -url $url -packageName $packageName
 
 
   Start-Sleep 2 #give it a sec or two to finish up
 }
 
 function Copy-DownloadedFileToCachePath {
+<#
+.SYNOPSIS
+Copy the downloaded binary (with a possibly discovered actual filename) to the cache folder as two files;
+one containg discovered filename in UTF8, the other binary
+#>
   param(
   [Parameter(Mandatory=$true)]
   [string]$downloadLocation,
   [Parameter(Mandatory=$true)]
   [string]$url,
   [Parameter(Mandatory=$true)]
-  [string]$packageName,
-  [int]$bitwidth
+  [string]$packageName
   )
   if(-not $env:ChocolateyInstallCachePath) {
     $env:ChocolateyInstallCachePath = [Environment]::GetEnvironmentVariable("ChocolateyInstallCachePath","Machine")
@@ -137,88 +142,74 @@ function Copy-DownloadedFileToCachePath {
       $env:ChocolateyInstallCachePath = [Environment]::GetEnvironmentVariable("ChocolateyInstallCachePath","User")
     }
   }
-    #If the $env:ChocolateyInstallCachePath is set, attempt to pull installers from there
-  if($env:ChocolateyInstallCachePath -and $downloadLocation) {
-    $cacheFullPath = Get-PackageInstallerCachePath -url $url -PackageNameAndVersion "${packageName}" -SourceLocation $downloadLocation -bitwidth $bitwidth
+
+  #If the $env:ChocolateyInstallCachePath is set, attempt to write installers there
+  $cacheEntry = Get-CachedInstallerFileNames -PackageName $packageName -url $url
+  if($cacheEntry -and $downloadLocation -and -not $cacheEntry.nameFile.StartsWith('http')) {
+    $downloadFileName = [io.path]::GetFileName($downloadLocation)
+
     write-host -fore Yellow $url 
-    $cacheDir = [IO.Path]::GetDirectoryName($cacheFullPath);
+    $cacheDir = [IO.Path]::GetDirectoryName($cacheEntry.nameFile);
     if(-not (Test-Path $cacheDir -PathType Container)) {
-      mkdir $cacheDir -errorAction SilentlyContinue
+      mkdir $cacheDir -errorAction SilentlyContinue | Out-Null
     }
-    copy $downloadLocation $cacheFullPath -force
-    Write-Host -ForegroundColor green "Copied $downloadLocation to $cacheFullPath"
+    Set-Content $cacheEntry.nameFile -Encoding UTF8 -value $downloadFileName
+    copy $downloadLocation $cacheEntry.binFile -force
+    Write-Host -ForegroundColor green "Copied $downloadLocation to $($cacheEntry.binFile)"
   }
-
 }
 
-function Get-PackageInstallerBaseCachePath {
-    param(
-    [Parameter(Mandatory=$true)]
-    [string]$PackageNameAndVersion)
-    #$outputPath = Join-Path $env:ChocolateyInstallCachePath (join-path $PackageNameAndVersion "INSTALLER_CACHES")
-    $outputpath = $env:ChocolateyInstallCachePath
-    return $outputPath
-}
-
-function Get-PackageInstallerCachePath {
-    param(  [Parameter(Mandatory=$true)]
-            [string]$url, 
-            [Parameter(Mandatory=$true)]
-            [string]$PackageNameAndVersion,
-            [Parameter(Mandatory=$false)]
-            [string]$SourceLocation,
-            [Parameter(Mandatory=$true)]
-            [int]$bitwidth)
-
-    $requestUri = new-object System.Uri ($url)
-   
-    $destFileName = [io.path]::GetFileName($requestUri.LocalPath)
-   if($SourceLocation) {
-    $destFileName = [io.path]::GetFileName($SourceLocation)
-   }
-
-    $subPath =  "${PackageNameAndVersion}__x${bitwidth}__${destFileName}"
-
-    $subPath = join-path (Get-PackageInstallerBaseCachePath $PackageNameAndVersion) $subPath
-    $outputPath =  $subPath
-    
-    return $outputPath
-}
-
-function Get-CachedInstallerPath {
-    param(  [Parameter(Mandatory=$true)]
-            [string]$PackageNameAndVersion,
-            [int]$bitwidth)
-    
-    if(-not $env:ChocolateyInstallCachePath) { return $null }
-    #The web downloader creates *.ignore files
-    $installerPath = gci $env:ChocolateyInstallCachePath -filter "${PackageNameAndVersion}__x${bitwidth}__*" | where { $_.FullName -inotlike "*.ignore"}
-   
-    return $installerPath.FullName
-
-}
-
-function Get-ActualInstallerFileName {
+function Get-CachedInstallerFileNames {
 <#
 .SYNOPSIS
-The cached files have the form of <PACKAGE_NAME>__x<BITWIDTH>__<ACTUALFILENAME>
+The cached files have the form of <PACKAGE_NAME>_<URL-ENCODED>_<URL-HASH>.<EXTENSION>
+Where URL-ENCODED is a safe subset of url characters - ASCII alnum, hyphen, underscore and period, with one or more non-safes being replace by a single underscore, max length 128
+and URL-HASH is a MD5 hash of original url in hex
+EXTENSION is .txt for the file containing the actual filename, and .bin for the binary content
 
+.OUTPUTS
+PSObject, property nameFile is filename of a file containing downloaded filename in UTF8 format, binFile is filename of file with binary content
 #>
-    param([Parameter(Mandatory=$true)]
-            [string]$CacheFilePath)
-
-    $filename = [io.path]::GetFileName($CacheFilePath)
-    $parts = $filename -isplit "__"
-    if(-not $parts -or $parts.Length -lt 3) {
-        write-warning "Expected file name to formatted like: <PACKAGE_NAME>__x<BITWIDTH>__<ACTUALFILENAME>, actual file name was: $filename"
+    param(  [Parameter(Mandatory=$true)]
+            [string]$packageName,
+            [Parameter(Mandatory=$true)]
+            [string]$url)
+    
+    $cacheBase = $env:ChocolateyInstallCachePath
+    if(-not $cacheBase) {
+      Write-Debug "Not using WebFile caching"
+      return $null
     }
-    return $parts[2]
+    Write-Debug "Using WebFile caching at $cacheBase"
+
+    $urlEncoded = ($url -replace '[^A-Za-z0-9_.-]', '@') -replace '@+', '_'
+    if ($urlEncoded.Length -gt 128) {
+      $urlEncoded = $urlEncoded.substring(0, 128)
+    }
+
+    $md5Hasher = new-object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider
+    $utf8Enc = new-object -TypeName System.Text.UTF8Encoding
+    $hashHex = [System.BitConverter]::ToString($md5Hasher.ComputeHash($utf8Enc.GetBytes($url))) -replace '-', ''
+    $cacheKey = "${PackageName}_${urlEncoded}_${hashHex}"
+
+    Write-Debug "Using cacheKey of $cacheKey"
+
+    if ($cacheBase.StartsWith('http')) {
+      $cacheBaseName = $cacheBase
+      if (-not ($cacheBaseName.EndsWith('/'))) {
+        $cacheBaseName += '/'
+      }
+      $cacheBaseName += $cacheKey
+    } else {
+      $cacheBaseName = Join-Path $cacheBase $cacheKey
+    }
+    return New-Object PSObject -Property @{ nameFile = $cacheBaseName+".txt"; binFile = $cacheBaseName+".bin" }
 }
 
 function Handle-CachedPackageInstaller {
 <#
 .SYNOPSIS
-Checks to see if a cached version of an installer exists for the given packagename and bitwidth (32 or 64).  
+Checks to see if a cached version of an installer exists for the given packagename and url.
 If the cached installer file exists, it will be copied to the location specified by fileFullPath. The file name
 of the installer in the cached source will be used and returned as an output paramter 
 
@@ -233,51 +224,83 @@ System.Bool. Returns true if a cache file exists, false if not
   [Parameter(Mandatory=$true)]
   [string]$packageName,
   [Parameter(Mandatory=$true)]
-  [int]$bitwidth,
+  [string]$url,
   [Parameter(Mandatory=$true)]
   [string]$fileFullPath,
   [ref]$actualOutputPath
   )
-  #first check if there is a local cache for the installer
-  $cacheFullPath = Get-CachedInstallerPath -PackageNameAndVersion $packageName -bitwidth $bitwidth
+
+  #First check if there is any local WebFile cache
+  $cacheEntry = Get-CachedInstallerFileNames -packageName $packageName -url $url
+  if (-not $cacheEntry) { return $false }
+
   $actualInstallerFullPath = $fileFullPath
 
+  $localNameFile = $null
+  $localBinFile = $null
+
   try {
-        if($cacheFullPath -and (Test-Path $cacheFullPath -PathType Leaf)) {
-            write-Host "Using cached installer found at: $cacheFullPath"
+    $originalCacheEntryUrl = $cacheEntry.binFile
 
-            #Copy the cached version of the file to the requested location if different
-            $cachedInstallerDir = [io.path]::GetDirectoryName($cacheFullPath)
-    
-            $actualInstallerFileName = Get-ActualInstallerFileName $cacheFullPath
-            $providedInstallerFileName = [io.path]::GetFileName($fileFullPath) 
-            $installerDir = ([io.path]::GetDirectoryName($fileFullPath.TrimEnd('\/ ')))
+    # Might refactor Get-ChocolateyWebFile into smart/cached outer layer & reusable inner part...
+    if ($cacheEntry.nameFile.StartsWith('http')) {
+      $localNameFile = [System.IO.Path]::GetTempFileName()
+      $localBinFile = [System.IO.Path]::GetTempFileName()
+      Write-Debug "Getting HTTP WebFile cache entries to $localNameFile, $localBinFile"
 
-            #the provided fileFUllPath is a directory
-            if((Test-Path $fileFullPath -PathType Container)) {
-                $actualInstallerFullPath = join-path  $fileFullPath $actualInstallerFileName
-
-            } elseif($providedInstallerFileName -notlike "$actualInstallerFileName") {
-            #The Provided file name does not match the actual installer name 
-                $installerDir = ([io.path]::GetDirectoryName($installerDir))
-                $actualInstallerFullPath = join-path  $installerDir $actualInstallerFileName 
-            }
-
-            if(-not (Test-Path $installerDir)) {
-                mkdir $installerDir
-            }
-
-            copy $cacheFullPath   $actualInstallerFullPath -force -verbose
-    
-
-
-            return $true;
-        }
-
+      try {
+        $tempOutputPath = ""
+        Get-WebFile -url $cacheEntry.nameFile -fileName $localNameFile -actualOutputPath ([ref]$tempOutputPath) -quiet
+        $cacheEntry.nameFile = $tempOutputPath
+        Get-WebFile -url $cacheEntry.binFile -fileName $localBinFile -actualOutputPath ([ref]$tempOutputPath) -quiet
+        $cacheEntry.binFile = $tempOutputPath
+      } catch {
+        Write-Debug "No HTTP-based WebFile cache entry for $url"
         return $false;
-    } finally {
-        if($actualOutputPath) {
-            $actualOutputPath.Value =  $actualInstallerFullPath
-        }
+      }
+
+      Write-Debug "Updating cacheEntry.nameFile=$($cacheEntry.nameFile)"
+      Write-Debug "Updating cacheEntry.binFile=$($cacheEntry.binFile)"
     }
+
+    if ((Test-Path $cacheEntry.nameFile -PathType Leaf) -and (Test-Path $cacheEntry.binFile -PathType Leaf)) {
+      write-Host "Using WebFile cached installer found at: $originalCacheEntryUrl"
+
+      $actualInstallerFileName = Get-Content $cacheEntry.nameFile -Encoding UTF8
+      write-Host "WebFile cached installer called: $actualInstallerFileName"
+
+      $providedInstallerFileName = [io.path]::GetFileName($fileFullPath)
+      $installerDir = ([io.path]::GetDirectoryName($fileFullPath.TrimEnd('\/ ')))
+
+      #the provided fileFullPath is a directory
+      if((Test-Path $fileFullPath -PathType Container)) {
+          $actualInstallerFullPath = join-path  $fileFullPath $actualInstallerFileName
+
+      } elseif($providedInstallerFileName -notlike "$actualInstallerFileName") {
+        #The Provided file name does not match the actual installer name
+        $installerDir = ([io.path]::GetDirectoryName($installerDir))
+        $actualInstallerFullPath = join-path  $installerDir $actualInstallerFileName
+      }
+
+      if(-not (Test-Path $installerDir)) {
+          mkdir $installerDir
+      }
+
+      Write-Debug "Using WebFile cache entry for $url"
+      copy $cacheEntry.binFile $actualInstallerFullPath -force -verbose
+
+      if($actualOutputPath) {
+        $actualOutputPath.Value =  $actualInstallerFullPath
+      }
+      return $true;
+    }
+  } catch {
+    Write-Debug "Error accessing WebFile cache - assuming absent/unavailable"
+  } finally {
+    if (($localNameFile) -and (Test-Path $localNameFile)) { Write-Debug "Removing temp file $localNameFile"; Remove-Item $localNameFile }
+    if (($localBinFile) -and (Test-Path $localBinFile)) { Write-Debug "Removing temp file $localBinFile"; Remove-Item $localBinFile }
+  }
+
+  Write-Debug "No WebFile cache entry for $url"
+  return $false;
 }
